@@ -19,13 +19,14 @@ use Ubiquity\cache\CacheManager;
 use Ubiquity\orm\traits\DAOPooling;
 use Ubiquity\orm\traits\DAOBulkUpdatesTrait;
 use Ubiquity\orm\traits\DAOPreparedTrait;
+use Ubiquity\cache\dao\AbstractDAOCache;
 
 /**
  * Gateway class between database and object model.
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.2.3
+ * @version 1.2.5
  *
  */
 class DAO {
@@ -41,6 +42,11 @@ class DAO {
 	public static $transformerOp = 'transform';
 	private static $conditionParsers = [ ];
 	protected static $modelsDatabase = [ ];
+	/**
+	 *
+	 * @var AbstractDAOCache
+	 */
+	protected static $cache;
 
 	public static function getDb($model) {
 		return self::getDatabase ( self::$modelsDatabase [$model] ?? 'default');
@@ -57,14 +63,12 @@ class DAO {
 	 * @return array
 	 */
 	public static function getAll($className, $condition = '', $included = true, $parameters = null, $useCache = NULL) {
-		return static::_getAll ( self::getDb ( $className ), $className, new ConditionParser ( $condition, null, $parameters ), $included, $useCache );
+		$db = self::getDb ( $className );
+		return static::_getAll ( $db, $className, new ConditionParser ( $condition, null, $parameters ), $included, $useCache );
 	}
 
 	public static function paginate($className, $page = 1, $rowsPerPage = 20, $condition = null, $included = true) {
-		if (! isset ( $condition )) {
-			$condition = '1=1';
-		}
-		return self::getAll ( $className, $condition . ' LIMIT ' . $rowsPerPage . ' OFFSET ' . (($page - 1) * $rowsPerPage), $included );
+		return self::getAll ( $className, ($condition ?? '1=1') . ' LIMIT ' . $rowsPerPage . ' OFFSET ' . (($page - 1) * $rowsPerPage), $included );
 	}
 
 	public static function getRownum($className, $ids) {
@@ -74,14 +78,12 @@ class DAO {
 		self::parseKey ( $ids, $className, $quote );
 		$condition = SqlUtils::getCondition ( $ids, $className );
 		$keyFields = OrmUtils::getKeyFields ( $className );
-		if (is_array ( $keyFields )) {
-			$keys = implode ( ',', $keyFields );
+		if (\is_array ( $keyFields )) {
+			$keys = \implode ( ',', $keyFields );
 		} else {
 			$keys = '1';
 		}
-		// TOFIX specific to DB driver
-		// pgsql: SELECT num FROM (SELECT *,row_number() OVER (ORDER BY {$keys}) AS num FROM {$quote}{$tableName}{$quote}) x where ".$condition;
-		return $db->queryColumn ( "SELECT num FROM (SELECT *, @rownum:=@rownum + 1 AS num FROM {$quote}{$tableName}{$quote}, (SELECT @rownum:=0) r ORDER BY {$keys}) d WHERE " . $condition );
+		return $db->getRowNum ( $tableName, $keys, $condition );
 	}
 
 	/**
@@ -103,6 +105,24 @@ class DAO {
 	}
 
 	/**
+	 * Tests the existence of objects of $className from the database respecting the condition possibly passed as parameter
+	 *
+	 * @param string $className complete classname of the model to load
+	 * @param string $condition Part following the WHERE of an SQL statement
+	 * @param array|null $parameters The query parameters
+	 * @return boolean
+	 */
+	public static function exists($className, $condition = '', $parameters = null) {
+		$tableName = OrmUtils::getTableName ( $className );
+		if ($condition != '') {
+			$condition = ' WHERE ' . $condition;
+		}
+		$db = self::getDb ( $className );
+		$quote = $db->quote;
+		return (1 == $db->prepareAndFetchColumn ( "SELECT EXISTS(SELECT 1 FROM {$quote}{$tableName}{$quote}{$condition})", $parameters ));
+	}
+
+	/**
 	 * Returns an instance of $className from the database, from $keyvalues values of the primary key or with a condition
 	 *
 	 * @param String $className complete classname of the model to load
@@ -113,6 +133,7 @@ class DAO {
 	 * @return object the instance loaded or null if not found
 	 */
 	public static function getOne($className, $condition, $included = true, $parameters = null, $useCache = NULL) {
+		$db = self::getDb ( $className );
 		$conditionParser = new ConditionParser ();
 		if (! isset ( $parameters )) {
 			$conditionParser->addKeyValues ( $condition, $className );
@@ -122,7 +143,7 @@ class DAO {
 		} else {
 			throw new DAOException ( "The \$condition parameter should not be an array if \$parameters is not null" );
 		}
-		return static::_getOne ( self::getDb ( $className ), $className, $conditionParser, $included, $useCache );
+		return static::_getOne ( $db, $className, $conditionParser, $included, $useCache );
 	}
 
 	/**
@@ -286,5 +307,34 @@ class DAO {
 
 	public static function start() {
 		self::$modelsDatabase = CacheManager::getModelsDatabases ();
+	}
+
+	public static function getDbCacheInstance($model) {
+		$db = static::$db [self::$modelsDatabase [$model] ?? 'default'];
+		return $db->getCacheInstance ();
+	}
+
+	public static function warmupCache($className, $condition = '', $included = false, $parameters = [ ]) {
+		$objects = self::getAll ( $className, $condition, $included, $parameters );
+		foreach ( $objects as $o ) {
+			self::$cache->store ( $className, OrmUtils::getKeyValues ( $o ), $o );
+		}
+		self::$cache->optimize ();
+		$offset = self::$modelsDatabase [$className] ?? 'default';
+		$db = self::$db [$offset];
+		$db->close ();
+		unset ( self::$db [$offset] );
+	}
+
+	public static function setCache(AbstractDAOCache $cache) {
+		self::$cache = $cache;
+	}
+
+	/**
+	 *
+	 * @return \Ubiquity\cache\dao\AbstractDAOCache
+	 */
+	public static function getCache() {
+		return static::$cache;
 	}
 }

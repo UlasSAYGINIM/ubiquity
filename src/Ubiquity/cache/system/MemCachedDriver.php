@@ -3,6 +3,7 @@
 namespace Ubiquity\cache\system;
 
 use Ubiquity\cache\CacheFile;
+use Ubiquity\exceptions\CacheException;
 
 /**
  * This class is responsible for storing values with MemCached.
@@ -10,7 +11,7 @@ use Ubiquity\cache\CacheFile;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.0
+ * @version 1.0.3
  *
  */
 class MemCachedDriver extends AbstractDataCache {
@@ -26,12 +27,35 @@ class MemCachedDriver extends AbstractDataCache {
 	/**
 	 * Initializes the cache-provider
 	 */
-	public function __construct($root, $postfix = "", $cacheParams = []) {
+	public function __construct($root, $postfix = "", $cacheParams = [ ]) {
 		parent::__construct ( $root, $postfix );
-		$defaultParams = [ 'server' => '127.0.0.1','port' => 11211 ];
-		$cacheParams = \array_merge ( $cacheParams, $defaultParams );
-		$this->cacheInstance = new \Memcached ();
-		$this->cacheInstance->addServer ( $cacheParams ['server'], $cacheParams ['port'] );
+		$defaultParams = [ 'servers' => [ [ 'host' => '0.0.0.0','port' => 11211 ] ],'serializer' => \Memcached::SERIALIZER_PHP,'persistent' => true ];
+		$cacheParams = \array_merge ( $defaultParams, $cacheParams );
+		$this->cacheInstance = new \Memcached ( $cacheParams ['persistent'] ? \crc32 ( $root ) : null );
+		if (isset ( $cacheParams ['serializer'] )) {
+			$this->cacheInstance->setOption ( \Memcached::OPT_SERIALIZER, $cacheParams ['serializer'] );
+		}
+		if ($this->cacheInstance->isPristine ()) {
+			$this->addServers ( $cacheParams ['servers'] );
+		}
+	}
+
+	public function addServer($host, $port, $weight = null) {
+		$this->cacheInstance->addServer ( $host, $port, $weight );
+		$statuses = $this->cacheInstance->getStats ();
+		if (! isset ( $statuses ["$host:$port"] )) {
+			throw new CacheException ( "Connection to the server $host:$port failed!" );
+		}
+	}
+
+	public function addServers(array $servers) {
+		foreach ( $servers as $srv ) {
+			$this->addServer ( $srv ['host'] ?? '0.0.0.0', $srv ['port'] ?? 11211, $srv ['weight'] ?? null);
+		}
+	}
+
+	public function setSerializer($serializer) {
+		$this->cacheInstance->setOption ( \Memcached::OPT_SERIALIZER, $serializer );
 	}
 
 	/**
@@ -46,25 +70,12 @@ class MemCachedDriver extends AbstractDataCache {
 		return \Memcached::RES_NOTFOUND !== $this->cacheInstance->getResultCode ();
 	}
 
-	public function store($key, $code, $tag = null, $php = true) {
-		$this->storeContent ( $key, $code, $tag );
-	}
-
-	/**
-	 * Caches the given data with the given key.
-	 *
-	 * @param string $key cache key
-	 * @param string $content the source-code to be cached
-	 * @param string $tag
-	 */
-	protected function storeContent($key, $content, $tag) {
-		$key = $this->getRealKey ( $key );
-		$this->cacheInstance->set ( $key, [ self::CONTENT => $content,self::TAG => $tag,self::TIME => \time () ] );
+	public function store($key, $content, $tag = null) {
+		$this->cacheInstance->set ( $this->getRealKey ( $key ), [ self::CONTENT => $content,self::TAG => $tag,self::TIME => \time () ] );
 	}
 
 	protected function getRealKey($key) {
-		$key = \str_replace ( "/", "-", $key );
-		return \str_replace ( "\\", "-", $key );
+		return \crc32 ( $key );
 	}
 
 	/**
@@ -74,8 +85,8 @@ class MemCachedDriver extends AbstractDataCache {
 	 * @return mixed the cached data
 	 */
 	public function fetch($key) {
-		$result = $this->cacheInstance->get ( $this->getRealKey ( $key ) ) [self::CONTENT];
-		return eval ( $result );
+		$entry = $this->cacheInstance->get ( $this->getRealKey ( $key ) );
+		return $entry [self::CONTENT] ?? false;
 	}
 
 	/**

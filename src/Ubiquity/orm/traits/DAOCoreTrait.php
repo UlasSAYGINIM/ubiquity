@@ -16,7 +16,7 @@ use Ubiquity\db\Database;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.1.1
+ * @version 1.1.3
  *
  * @property array $db
  * @property boolean $useTransformers
@@ -29,7 +29,7 @@ trait DAOCoreTrait {
 
 	abstract public static function _affectsRelationObjects($className, $classPropKey, $manyToOneQueries, $oneToManyQueries, $manyToManyParsers, $objects, $included, $useCache): void;
 
-	abstract protected static function prepareManyToMany(&$ret, $instance, $member, $annot = null);
+	abstract protected static function prepareManyToMany($db, &$ret, $instance, $member, $annot = null);
 
 	abstract protected static function prepareManyToOne(&$ret, $instance, $value, $fkField, $annotationArray);
 
@@ -89,8 +89,7 @@ trait DAOCoreTrait {
 			$oneToManyQueries = [ ];
 			$manyToOneQueries = [ ];
 			$manyToManyParsers = [ ];
-			$accessors = $metaDatas ['#accessors'];
-			$object = self::_loadObjectFromRow ( \current ( $query ), $className, $invertedJoinColumns, $manyToOneQueries, $oneToManyFields, $manyToManyFields, $oneToManyQueries, $manyToManyParsers, $accessors, $transformers );
+			$object = self::_loadObjectFromRow ( $db, \current ( $query ), $className, $invertedJoinColumns, $manyToOneQueries, $oneToManyFields, $manyToManyFields, $oneToManyQueries, $manyToManyParsers, $metaDatas ['#memberNames'] ?? null, $metaDatas ['#accessors'], $transformers );
 			if ($hasIncluded) {
 				self::_affectsRelationObjects ( $className, OrmUtils::getFirstPropKey ( $className ), $manyToOneQueries, $oneToManyQueries, $manyToManyParsers, [ $object ], $included, $useCache );
 			}
@@ -126,11 +125,9 @@ trait DAOCoreTrait {
 		$manyToOneQueries = [ ];
 		$manyToManyParsers = [ ];
 		$propsKeys = OrmUtils::getPropKeys ( $className );
-		$accessors = $metaDatas ['#accessors'];
 		foreach ( $query as $row ) {
-			$object = self::_loadObjectFromRow ( $row, $className, $invertedJoinColumns, $manyToOneQueries, $oneToManyFields, $manyToManyFields, $oneToManyQueries, $manyToManyParsers, $accessors, $transformers );
-			$key = OrmUtils::getPropKeyValues ( $object, $propsKeys );
-			$objects [$key] = $object;
+			$object = self::_loadObjectFromRow ( $db, $row, $className, $invertedJoinColumns, $manyToOneQueries, $oneToManyFields, $manyToManyFields, $oneToManyQueries, $manyToManyParsers, $metaDatas ['#memberNames'] ?? null, $metaDatas ['#accessors'], $transformers );
+			$objects [OrmUtils::getPropKeyValues ( $object, $propsKeys )] = $object;
 		}
 		if ($hasIncluded) {
 			self::_affectsRelationObjects ( $className, OrmUtils::getFirstPropKey ( $className ), $manyToOneQueries, $oneToManyQueries, $manyToManyParsers, $objects, $included, $useCache );
@@ -145,33 +142,70 @@ trait DAOCoreTrait {
 
 	/**
 	 *
+	 * @param Database $db
 	 * @param array $row
 	 * @param string $className
 	 * @param array $invertedJoinColumns
 	 * @param array $manyToOneQueries
+	 * @param array $oneToManyFields
+	 * @param array $manyToManyFields
+	 * @param array $oneToManyQueries
+	 * @param array $manyToManyParsers
+	 * @param array $memberNames
 	 * @param array $accessors
+	 * @param array $transformers
 	 * @return object
 	 */
-	public static function _loadObjectFromRow($row, $className, &$invertedJoinColumns, &$manyToOneQueries, &$oneToManyFields, &$manyToManyFields, &$oneToManyQueries, &$manyToManyParsers, &$accessors, &$transformers) {
+	public static function _loadObjectFromRow(Database $db, $row, $className, $invertedJoinColumns, &$manyToOneQueries, $oneToManyFields, $manyToManyFields, &$oneToManyQueries, &$manyToManyParsers, $memberNames, $accessors, $transformers) {
 		$o = new $className ();
-		if (self::$useTransformers) {
-			foreach ( $transformers as $field => $transformer ) {
-				$transform = self::$transformerOp;
-				$row [$field] = $transformer::$transform ( $row [$field] );
-			}
+		if (self::$useTransformers && $memberNames) { // TOTO to remove
+			self::applyTransformers ( $transformers, $row, $memberNames );
 		}
 		foreach ( $row as $k => $v ) {
-			if (isset ( $accessors [$k] )) {
-				$accesseur = $accessors [$k];
+			if ($accesseur = ($accessors [$k] ?? false)) {
 				$o->$accesseur ( $v );
 			}
-			$o->_rest [$k] = $v;
+			$o->_rest [$memberNames [$k] ?? $k] = $v;
 			if (isset ( $invertedJoinColumns ) && isset ( $invertedJoinColumns [$k] )) {
 				$fk = '_' . $k;
 				$o->$fk = $v;
 				self::prepareManyToOne ( $manyToOneQueries, $o, $v, $fk, $invertedJoinColumns [$k] );
 			}
 		}
+		self::loadManys ( $o, $db, $oneToManyFields, $oneToManyQueries, $manyToManyFields, $manyToManyParsers );
+		return $o;
+	}
+
+	/**
+	 *
+	 * @param Database $db
+	 * @param array $row
+	 * @param string $className
+	 * @param array $memberNames
+	 * @param array $transformers
+	 * @return object
+	 */
+	public static function _loadSimpleObjectFromRow(Database $db, $row, $className, $memberNames, $transformers) {
+		$o = new $className ();
+		if (self::$useTransformers && $memberNames) { // TOTO to remove
+			self::applyTransformers ( $transformers, $row, $memberNames );
+		}
+		foreach ( $row as $k => $v ) {
+			$o->$k = $v;
+			$o->_rest [$memberNames [$k] ?? $k] = $v;
+		}
+		return $o;
+	}
+
+	protected static function applyTransformers($transformers, $row, $memberNames) {
+		foreach ( $transformers as $member => $transformer ) {
+			$field = \array_search ( $member, $memberNames );
+			$transform = self::$transformerOp;
+			$row [$field] = $transformer::{$transform} ( $row [$field] );
+		}
+	}
+
+	protected static function loadManys($o, $db, $oneToManyFields, $oneToManyQueries, $manyToManyFields, $manyToManyParsers) {
 		if (isset ( $oneToManyFields )) {
 			foreach ( $oneToManyFields as $k => $annot ) {
 				self::prepareOneToMany ( $oneToManyQueries, $o, $k, $annot );
@@ -179,10 +213,9 @@ trait DAOCoreTrait {
 		}
 		if (isset ( $manyToManyFields )) {
 			foreach ( $manyToManyFields as $k => $annot ) {
-				self::prepareManyToMany ( $manyToManyParsers, $o, $k, $annot );
+				self::prepareManyToMany ( $db, $manyToManyParsers, $o, $k, $annot );
 			}
 		}
-		return $o;
 	}
 
 	private static function parseKey(&$keyValues, $className, $quote) {
@@ -190,6 +223,13 @@ trait DAOCoreTrait {
 			if (\strrpos ( $keyValues, '=' ) === false && \strrpos ( $keyValues, '>' ) === false && \strrpos ( $keyValues, '<' ) === false) {
 				$keyValues = $quote . OrmUtils::getFirstKey ( $className ) . $quote . "='" . $keyValues . "'";
 			}
+		}
+	}
+
+	public static function storeDbCache(string $model) {
+		$offset = self::$modelsDatabase [$model] ?? 'default';
+		if (isset ( self::$db [$offset] )) {
+			self::$db [$offset]->storeCache ();
 		}
 	}
 }

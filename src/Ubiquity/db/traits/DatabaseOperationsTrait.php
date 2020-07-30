@@ -12,7 +12,7 @@ use Ubiquity\db\SqlUtils;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.2
+ * @version 1.0.4
  * @property mixed $cache
  * @property array $options
  * @property \Ubiquity\db\providers\AbstractDbWrapper $wrapperObject
@@ -71,6 +71,15 @@ trait DatabaseOperationsTrait {
 			}
 		}
 		return $result;
+	}
+
+	public function prepareAndExecuteNoCache($tableName, $condition, $fields, $parameters = null) {
+		$quote = SqlUtils::$quote;
+		return $this->wrapperObject->_optPrepareAndExecute ( "SELECT {$fields} FROM {$quote}{$tableName}{$quote} {$condition}", $parameters );
+	}
+
+	public function storeCache() {
+		$this->cache->storeDeferred ();
 	}
 
 	public function prepareAndFetchAll($sql, $parameters = null, $mode = null) {
@@ -144,6 +153,28 @@ trait DatabaseOperationsTrait {
 	}
 
 	/**
+	 * Prepares and returns a statement for execution and gives it a name.
+	 *
+	 * @param $name
+	 * @param String $sql
+	 * @return mixed
+	 */
+	public function prepareNamedStatement(string $name, string $sql) {
+		return $this->wrapperObject->prepareNamedStatement ( $name, $sql );
+	}
+
+	/**
+	 * Returns the statement corresponding to the name.
+	 *
+	 * @param string $name
+	 * @param ?string $sql
+	 * @return mixed
+	 */
+	public function getNamedStatement(string $name, ?string $sql = null) {
+		return $this->wrapperObject->getNamedStatement ( $name, $sql );
+	}
+
+	/**
 	 * Sets $value to $parameter
 	 *
 	 * @param mixed $statement
@@ -160,8 +191,8 @@ trait DatabaseOperationsTrait {
 	 *
 	 * @return string
 	 */
-	public function lastInserId() {
-		return $this->wrapperObject->lastInsertId ();
+	public function lastInserId($name = null) {
+		return $this->wrapperObject->lastInsertId ( $name );
 	}
 
 	/**
@@ -192,4 +223,3 @@ trait DatabaseOperationsTrait {
 		return ($this->wrapperObject && $this->wrapperObject->ping ());
 	}
 }
-

@@ -10,4 +10,7 @@ modules:
         - WebDriver:
             url: 'http://dev.local:8801/'
             browser: chrome
+            capabilities:
+              "goog:chromeOptions":
+                w3c: false
         - \Helper\Acceptance

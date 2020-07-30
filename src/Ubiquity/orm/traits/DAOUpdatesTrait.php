@@ -17,7 +17,7 @@ use Ubiquity\controllers\Startup;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.1.2
+ * @version 1.1.6
  * @property \Ubiquity\db\Database $db
  *
  */
@@ -129,7 +129,12 @@ trait DAOUpdatesTrait {
 		$quote = $db->quote;
 		$tableName = OrmUtils::getTableName ( $className );
 		$keyAndValues = Reflexion::getPropertiesAndValues ( $instance );
-		$keyAndValues = array_merge ( $keyAndValues, OrmUtils::getManyToOneMembersAndValues ( $instance ) );
+		$keyAndValues = \array_merge ( $keyAndValues, OrmUtils::getManyToOneMembersAndValues ( $instance ) );
+		$pk = OrmUtils::getFirstKey ( $className );
+		$pkVal = $keyAndValues [$pk] ?? null;
+		if (($pkVal) == null) {
+			unset ( $keyAndValues [$pk] );
+		}
 		$sql = "INSERT INTO {$quote}{$tableName}{$quote} (" . SqlUtils::getInsertFields ( $keyAndValues ) . ') VALUES(' . SqlUtils::getInsertFieldsValues ( $keyAndValues ) . ')';
 		if (Logger::isActive ()) {
 			Logger::info ( 'DAOUpdates', $sql, 'insert' );
@@ -140,14 +145,17 @@ trait DAOUpdatesTrait {
 		try {
 			$result = $statement->execute ( $keyAndValues );
 			if ($result) {
-				$pk = OrmUtils::getFirstKey ( $className );
-				$accesseurId = 'set' . \ucfirst ( $pk );
-				$lastId = $db->lastInserId ();
-				if ($lastId != 0) {
-					$instance->$accesseurId ( $lastId );
-					$instance->_rest = $keyAndValues;
-					$instance->_rest [$pk] = $lastId;
+				if ($pkVal == null) {
+					$lastId = $db->lastInserId ( "{$tableName}_{$pk}_seq" );
+					if ($lastId != 0) {
+						$propKey = OrmUtils::getFirstPropKey ( $className );
+						$propKey->setValue ( $instance, $lastId );
+						$pkVal = $lastId;
+					}
 				}
+				$instance->_rest = $keyAndValues;
+				$instance->_rest [$pk] = $pkVal;
+
 				if ($insertMany) {
 					self::insertOrUpdateAllManyToMany ( $instance );
 				}
@@ -185,10 +193,9 @@ trait DAOUpdatesTrait {
 	 * @param String $member
 	 */
 	public static function insertOrUpdateManyToMany($instance, $member) {
-		$parser = new ManyToManyParser ( $instance, $member );
+		$db = self::getDb ( \get_class ( $instance ) );
+		$parser = new ManyToManyParser ( $db, $instance, $member );
 		if ($parser->init ()) {
-			$className = $parser->getTargetEntityClass ();
-			$db = self::getDb ( $className );
 			$quote = $db->quote;
 			$myField = $parser->getMyFkField ();
 			$field = $parser->getFkField ();
@@ -237,13 +244,14 @@ trait DAOUpdatesTrait {
 		$sql = "UPDATE {$quote}{$tableName}{$quote} SET " . SqlUtils::getUpdateFieldsKeyAndParams ( $ColumnskeyAndValues ) . ' WHERE ' . SqlUtils::getWhere ( $keyFieldsAndValues );
 		if (Logger::isActive ()) {
 			Logger::info ( "DAOUpdates", $sql, "update" );
-			Logger::info ( "DAOUpdates", json_encode ( $ColumnskeyAndValues ), "Key and values" );
+			Logger::info ( "DAOUpdates", \json_encode ( $ColumnskeyAndValues ), "Key and values" );
 		}
 		$statement = $db->getUpdateStatement ( $sql );
 		try {
 			$result = $statement->execute ( $ColumnskeyAndValues );
-			if ($updateMany && $result)
+			if ($updateMany && $result) {
 				self::insertOrUpdateAllManyToMany ( $instance );
+			}
 			EventsManager::trigger ( DAOEvents::AFTER_UPDATE, $instance, $result );
 			$instance->_rest = \array_merge ( $instance->_rest, $ColumnskeyAndValues );
 			return $result;
@@ -279,8 +287,9 @@ trait DAOUpdatesTrait {
 					EventsManager::trigger ( 'dao.before.update', $instance );
 					$ColumnskeyAndValues = \array_merge ( Reflexion::getPropertiesAndValues ( $instance ), OrmUtils::getManyToOneMembersAndValues ( $instance ) );
 					$result = $statement->execute ( $ColumnskeyAndValues );
-					if ($updateMany && $result)
+					if ($updateMany && $result) {
 						self::insertOrUpdateAllManyToMany ( $instance );
+					}
 					EventsManager::trigger ( DAOEvents::AFTER_UPDATE, $instance, $result );
 					$instance->_rest = \array_merge ( $instance->_rest, $ColumnskeyAndValues );
 					if (Logger::isActive ()) {

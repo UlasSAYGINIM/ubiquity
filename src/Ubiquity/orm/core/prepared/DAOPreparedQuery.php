@@ -6,13 +6,14 @@ use Ubiquity\db\SqlUtils;
 use Ubiquity\orm\DAO;
 use Ubiquity\orm\OrmUtils;
 use Ubiquity\orm\parser\ConditionParser;
+use Ubiquity\cache\database\DbCache;
 
 /**
  * Ubiquity\orm\core\prepared$DAOPreparedQuery
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.1
+ * @version 1.0.5
  *
  */
 abstract class DAOPreparedQuery {
@@ -35,21 +36,25 @@ abstract class DAOPreparedQuery {
 	protected $propsKeys;
 	protected $accessors;
 	protected $fieldList;
+	protected $memberList;
 	protected $firstPropKey;
 	protected $condition;
 	protected $preparedCondition;
+	protected $additionalMembers = [ ];
+	protected $sqlAdditionalMembers = "";
+	protected $allPublic = false;
 	/**
 	 *
 	 * @var \Ubiquity\db\Database
 	 */
 	protected $db;
 
-	public function __construct($className, $condition = null, $included = false) {
+	public function __construct($className, $condition = null, $included = false, $cache = null) {
 		$this->className = $className;
 		$this->included = $included;
 		$this->condition = $condition;
 		$this->conditionParser = new ConditionParser ( $condition );
-		$this->prepare ();
+		$this->prepare ( $cache );
 		$this->preparedCondition = SqlUtils::checkWhere ( $this->conditionParser->getCondition () );
 	}
 
@@ -165,8 +170,19 @@ abstract class DAOPreparedQuery {
 		return $this->fieldList;
 	}
 
-	protected function prepare() {
+	/**
+	 *
+	 * @return mixed
+	 */
+	public function getMemberList() {
+		return $this->memberList;
+	}
+
+	protected function prepare(?DbCache $cache = null) {
 		$this->db = DAO::getDb ( $this->className );
+		if (isset ( $cache )) {
+			$this->db->setCacheInstance ( $cache );
+		}
 		$this->included = DAO::_getIncludedForStep ( $this->included );
 
 		$metaDatas = OrmUtils::getModelMetadata ( $this->className );
@@ -177,11 +193,61 @@ abstract class DAOPreparedQuery {
 		}
 		$this->transformers = $metaDatas ['#transformers'] [DAO::$transformerOp] ?? [ ];
 		$this->fieldList = DAO::_getFieldList ( $this->tableName, $metaDatas );
+		$this->memberList = \array_flip ( \array_diff ( $metaDatas ['#fieldNames'], $metaDatas ['#notSerializable'] ) );
 		$this->propsKeys = OrmUtils::getPropKeys ( $this->className );
-		$this->accessors = $metaDatas ['#accessors'];
+
 		$this->firstPropKey = OrmUtils::getFirstPropKey ( $this->className );
+		if (! ($this->allPublic = OrmUtils::hasAllMembersPublic ( $this->className ))) {
+			$this->accessors = $metaDatas ['#accessors'];
+		}
+	}
+
+	protected function updateSqlAdditionalMembers() {
+		if (\count ( $this->additionalMembers ) > 0) {
+			$this->sqlAdditionalMembers = ',' . $this->parseExpressions ();
+		}
+	}
+
+	protected function parseExpressions() {
+		return \implode ( ',', $this->additionalMembers );
+	}
+
+	protected function addAditionnalMembers($object, $row) {
+		foreach ( $this->additionalMembers as $member => $_ ) {
+			$object->{$member} = $row [$member] ?? null;
+			$object->_rest [$member] = $row [$member] ?? null;
+		}
 	}
 
 	abstract public function execute($params = [ ], $useCache = false);
-}
 
+	/**
+	 * Adds a new expression and associates it with a new member of the class added at runtime.
+	 *
+	 * @param string $sqlExpression The SQL expression (part of the SQL SELECT)
+	 * @param string $memberName The new associated member name
+	 */
+	public function addMember(string $sqlExpression, string $memberName): void {
+		$this->additionalMembers [$memberName] = $sqlExpression . " AS '{$memberName}'";
+		$this->updateSqlAdditionalMembers ();
+	}
+
+	/**
+	 * Adds new expressions and their associated members at runtime.
+	 *
+	 * @param array $expressionsNames An associative array of [memberName=>sqlExpression,...]
+	 */
+	public function addMembers(array $expressionsNames): void {
+		foreach ( $expressionsNames as $member => $expression ) {
+			$this->additionalMembers [$member] = $expression . " AS '{$member}'";
+		}
+		$this->updateSqlAdditionalMembers ();
+	}
+
+	/**
+	 * Store the cache for a prepared Query
+	 */
+	public function storeDbCache() {
+		$this->db->storeCache ();
+	}
+}

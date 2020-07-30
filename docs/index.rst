@@ -15,6 +15,9 @@ Ubiquity User guide
    
 .. sidebar:: New in documentation
 
+   - :ref:`OAuth client module<oauth>`
+   - :ref:`Mailer module<mailer>`
+   - :ref:`Servers configuration<servers>`
    - :ref:`Database connexions<db>`
    - :ref:`Optimization<optimization>`
    - :ref:`Rich client<richclient>`
@@ -125,6 +128,7 @@ Ubiquity User guide
    extra/libraries
    extra/caching
    extra/dependencies
+   extra/oauth
 
 Indices and tables
 ==================

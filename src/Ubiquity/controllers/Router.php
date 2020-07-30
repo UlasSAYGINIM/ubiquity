@@ -15,7 +15,7 @@ use Ubiquity\utils\http\URequest;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.10
+ * @version 1.0.13
  *
  */
 class Router {
@@ -23,14 +23,15 @@ class Router {
 	protected static $routes;
 
 	private static function cleanParam(string $param): string {
-		if (\substr ( $param, - 1 ) === '/')
+		if (\substr ( $param, - 1 ) === '/') {
 			return \substr ( $param, 0, - 1 );
+		}
 		return $param;
 	}
 
 	private static function getRoute_(&$routeDetails, $routePath, $matches, $cachedResponse) {
 		if (! isset ( $routeDetails ['controller'] )) {
-			$method = URequest::getMethod ();
+			$method = \strtolower ( $_SERVER ['REQUEST_METHOD'] );
 			if (isset ( $routeDetails [$method] )) {
 				$routeDetailsMethod = $routeDetails [$method];
 				return self::getRouteUrlParts ( [ 'path' => $routePath,'details' => $routeDetailsMethod ], $matches, $routeDetailsMethod ['cache'] ?? false, $routeDetailsMethod ['duration'] ?? null, $cachedResponse );
@@ -54,8 +55,9 @@ class Router {
 	protected static function checkRouteName($routeDetails, $name) {
 		if (! isset ( $routeDetails ['name'] )) {
 			foreach ( $routeDetails as $methodRouteDetail ) {
-				if (isset ( $methodRouteDetail ['name'] ) && $methodRouteDetail ['name'] == $name)
+				if (isset ( $methodRouteDetail ['name'] ) && $methodRouteDetail ['name'] == $name) {
 					return true;
+				}
 			}
 		}
 		return isset ( $routeDetails ['name'] ) && $routeDetails ['name'] == $name;
@@ -65,8 +67,9 @@ class Router {
 		$index = 0;
 		foreach ( $paramsOrder as $order ) {
 			if ($order === '*') {
-				if (isset ( $params [$index] ))
+				if (isset ( $params [$index] )) {
 					$routeUrlParts = \array_merge ( $routeUrlParts, \array_diff ( \explode ( '/', $params [$index] ), [ '' ] ) );
+				}
 				break;
 			}
 			if (($order [0] ?? '') === '~') {
@@ -122,7 +125,6 @@ class Router {
 				}
 			}
 		}
-		Logger::warn ( 'Router', "No route found for {$path}", 'getRoute' );
 		return false;
 	}
 
@@ -133,15 +135,29 @@ class Router {
 	 * @param array $parameters array of the route parameters. default : []
 	 * @param boolean $absolute
 	 */
-	public static function getRouteByName($name, $parameters = [], $absolute = true) {
+	public static function getRouteByName($name, $parameters = [ ], $absolute = true) {
 		foreach ( self::$routes as $routePath => $routeDetails ) {
 			if (self::checkRouteName ( $routeDetails, $name )) {
-				if (\sizeof ( $parameters ) > 0)
+				if (\sizeof ( $parameters ) > 0) {
 					$routePath = self::_getURL ( $routePath, $parameters );
-				if (! $absolute)
+				}
+				if (trim ( $routePath, '/' ) == '_default') {
+					$routePath = "/";
+				}
+				if (! $absolute) {
 					return \ltrim ( $routePath, '/' );
-				else
+				} else {
 					return $routePath;
+				}
+			}
+		}
+		return false;
+	}
+
+	public static function getRouteInfoByName($name) {
+		foreach ( self::$routes as $routeDetails ) {
+			if (self::checkRouteName ( $routeDetails, $name )) {
+				return $routeDetails;
 			}
 		}
 		return false;
@@ -155,7 +171,7 @@ class Router {
 	 * @param boolean $absolute true if the path is absolute (/ at first)
 	 * @return boolean|string|array|mixed the generated path (/path/to/route)
 	 */
-	public static function path($name, $parameters = [], $absolute = false) {
+	public static function path($name, $parameters = [ ], $absolute = false) {
 		return self::getRouteByName ( $name, $parameters, $absolute );
 	}
 
@@ -166,7 +182,7 @@ class Router {
 	 * @param array $parameters default: []
 	 * @return string the generated url (http://myApp/path/to/route)
 	 */
-	public static function url($name, $parameters = []): string {
+	public static function url($name, $parameters = [ ]): string {
 		return URequest::getUrl ( self::getRouteByName ( $name, $parameters, false ) );
 	}
 

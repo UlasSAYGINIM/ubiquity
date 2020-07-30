@@ -26,16 +26,17 @@ class AdminCest extends BaseAcceptance {
 	private function gotoAdminModule(string $url, AcceptanceTester $I) {
 		$I->amOnPage ( "/Admin/index" );
 		$I->seeInCurrentUrl ( "Admin/index" );
-		$this->waitAndclick ( $I, "a[href='" . $url . "']" );
+		// $this->waitAndclick ( $I, "a[href='" . $url . "']" );
+		$I->amOnPage ( '/' . $url );
 		$I->waitForElementVisible ( "#content-header", self::TIMEOUT );
 		$I->canSeeInCurrentUrl ( $url );
 	}
 
 	public function tryToGotoAdminModels(AcceptanceTester $I) {
-		$this->gotoAdminModule ( "Admin/Models", $I );
+		$this->gotoAdminModule ( "Admin/models", $I );
 		$I->click ( "a[data-model='models.Connection']" );
 		$I->waitForElementVisible ( "#btAddNew", self::TIMEOUT );
-		$I->canSeeInCurrentUrl ( "/Admin/showModel/models.Connection" );
+		$I->canSeeInCurrentUrl ( "/Admin/_showModel/models.Connection" );
 		$I->see ( 'organizations/display/4', "#lv td" );
 		$I->click ( "button._edit[data-ajax='8']" );
 		$I->waitForElementVisible ( "#modal-frmEdit-models-Connection", self::TIMEOUT );
@@ -123,11 +124,11 @@ class AdminCest extends BaseAcceptance {
 		$this->gotoAdminModule ( "Admin/Themes", $I );
 		$I->canSee ( "Themes module", "body" );
 		$I->click ( '._saveConfig' );
-		$this->waitAndclick ( $I, "._setTheme[href='Admin/setTheme/foundation']" );
+		$this->waitAndclick ( $I, "._setTheme[href='Admin/_setTheme/foundation']" );
 		$I->amOnPage ( "/" );
 		$I->canSee ( "foundation" );
 		$this->gotoAdminModule ( "Admin/Themes", $I );
-		$this->waitAndclick ( $I, "._setTheme[href='Admin/setTheme/semantic']" );
+		$this->waitAndclick ( $I, "._setTheme[href='Admin/_setTheme/semantic']" );
 		$I->amOnPage ( "/" );
 		$I->canSee ( "semantic" );
 	}
@@ -231,7 +232,9 @@ class AdminCest extends BaseAcceptance {
 		$I->waitForText ( 'newMaintenance' );
 		$I->waitForElement ( "#bt-de-activate" );
 
-		$I->amOnPage ( "/TestCrudOrgas" );
+		$I->wait ( self::TIMEOUT );
+
+		$I->amOnPage ( "/" );
 		$I->waitForText ( "Coming soon" );
 		$I->waitForText ( "Soon available" );
 		$I->waitForElement ( "#remind" );

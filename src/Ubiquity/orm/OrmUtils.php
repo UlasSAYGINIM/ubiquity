@@ -12,7 +12,7 @@ use Ubiquity\orm\traits\OrmUtilsFieldsTrait;
  * Object/relational mapping utilities
  *
  * @author jc
- * @version 1.0.4
+ * @version 1.0.6
  */
 class OrmUtils {
 
@@ -20,7 +20,7 @@ class OrmUtils {
 	private static $modelsMetadatas;
 
 	public static function getModelMetadata($className) {
-		return self::$modelsMetadatas [$className] ?? (self::$modelsMetadatas [$className] = CacheManager::getOrmModelCache ( $className ));
+		return self::$modelsMetadatas [$className] ??= CacheManager::getOrmModelCache ( $className );
 	}
 
 	public static function isSerializable($class, $member) {
@@ -49,15 +49,15 @@ class OrmUtils {
 
 	public static function getKeyFieldsAndValues($instance) {
 		$class = \get_class ( $instance );
-		$kf = self::getAnnotationInfo ( $class, '#primaryKeys' );
-		return self::getFieldsAndValues_ ( $instance, $kf );
+		return self::getFieldsAndValues_ ( $instance, self::getKeyMembers ( $class ) );
 	}
 
 	public static function getFieldsAndValues_($instance, $members) {
 		$ret = [ ];
+		$fieldnames = self::getAnnotationInfo ( \get_class ( $instance ), '#fieldNames' );
 		foreach ( $members as $member ) {
 			$v = Reflexion::getMemberValue ( $instance, $member );
-			$ret [$member] = $v;
+			$ret [$fieldnames [$member] ?? $member] = $v;
 		}
 		return $ret;
 	}
@@ -73,8 +73,9 @@ class OrmUtils {
 
 	public static function getMembers($className) {
 		$fieldNames = self::getAnnotationInfo ( $className, '#fieldNames' );
-		if ($fieldNames !== false)
+		if ($fieldNames !== false) {
 			return \array_keys ( $fieldNames );
+		}
 		return [ ];
 	}
 
@@ -190,5 +191,16 @@ class OrmUtils {
 
 	public static function clearMetaDatas() {
 		self::$modelsMetadatas = [ ];
+	}
+
+	public static function hasAllMembersPublic($className) {
+		$members = self::getMembers ( $className );
+		foreach ( $members as $memberName ) {
+			$field = new \ReflectionProperty ( $className, $memberName );
+			if (! $field->isPublic ()) {
+				return false;
+			}
+		}
+		return true;
 	}
 }

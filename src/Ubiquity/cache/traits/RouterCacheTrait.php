@@ -12,6 +12,7 @@ use Ubiquity\controllers\di\DiManager;
 use Ubiquity\utils\base\UIntrospection;
 use Ubiquity\controllers\Controller;
 use Ubiquity\controllers\StartupAsync;
+use Ubiquity\utils\http\UResponse;
 
 /**
  *
@@ -19,7 +20,7 @@ use Ubiquity\controllers\StartupAsync;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.8
+ * @version 1.0.9
  * @property \Ubiquity\cache\system\AbstractDataCache $cache
  *
  */
@@ -61,7 +62,7 @@ trait RouterCacheTrait {
 	}
 
 	protected static function sortByPriority(&$array) {
-		uasort ( $array, function ($item1, $item2) {
+		\uasort ( $array, function ($item1, $item2) {
 			return UArray::getRecursive ( $item2, 'priority', 0 ) <=> UArray::getRecursive ( $item1, 'priority', 0 );
 		} );
 		UArray::removeRecursive ( $array, 'priority' );
@@ -69,8 +70,8 @@ trait RouterCacheTrait {
 
 	private static function initRouterCache(&$config, $silent = false) {
 		$routes = self::parseControllerFiles ( $config, $silent );
-		self::$cache->store ( 'controllers/routes.default', 'return ' . UArray::asPhpArray ( $routes ['default'], 'array' ) . ';', 'controllers' );
-		self::$cache->store ( 'controllers/routes.rest', 'return ' . UArray::asPhpArray ( $routes ['rest'], 'array' ) . ';', 'controllers' );
+		self::$cache->store ( 'controllers/routes.default', $routes ['default'], 'controllers' );
+		self::$cache->store ( 'controllers/routes.rest', $routes ['rest'], 'controllers' );
 		DiManager::init ( $config );
 		if (! $silent) {
 			echo "Router cache reset\n";
@@ -94,16 +95,17 @@ trait RouterCacheTrait {
 	public static function storeDynamicRoutes($isRest = false) {
 		$routes = Router::getRoutes ();
 		$part = ($isRest) ? 'rest' : 'default';
-		self::$cache->store ( 'controllers/routes.' . $part, 'return ' . UArray::asPhpArray ( $routes, 'array' ) . ';', 'controllers' );
+		self::$cache->store ( 'controllers/routes.' . $part, $routes, 'controllers' );
 	}
 
 	private static function storeRouteResponse($key, $response) {
-		self::$cache->store ( 'controllers/' . $key, $response, 'controllers', false );
+		$cache = [ 'content-type' => UResponse::$headers ['Content-Type'] ?? 'text/html','content' => $response ];
+		self::$cache->store ( 'controllers/' . $key, $cache, 'controllers' );
 		return $response;
 	}
 
 	private static function getRouteKey($routePath) {
-		if (is_array ( $routePath )) {
+		if (\is_array ( $routePath )) {
 			return 'path' . \md5 ( \implode ( '', $routePath ) );
 		}
 		return 'path' . \md5 ( Router::slashPath ( $routePath ) );
@@ -125,8 +127,11 @@ trait RouterCacheTrait {
 		$key = self::getRouteKey ( $routePath );
 
 		if (self::$cache->exists ( 'controllers/' . $key ) && ! self::expired ( $key, $duration )) {
-			$response = self::$cache->file_get_contents ( 'controllers/' . $key );
-			return $response;
+			$response = self::$cache->fetch ( 'controllers/' . $key );
+			if ($ct = $response ['content-type'] ?? false) {
+				UResponse::setContentType ( $ct );
+			}
+			return $response ['content'] ?? '';
 		} else {
 			$response = Startup::runAsString ( $routeArray );
 			return self::storeRouteResponse ( $key, $response );
@@ -186,7 +191,7 @@ trait RouterCacheTrait {
 	public static function addRoute($path, $controller, $action = 'index', $methods = null, $name = '', $isRest = false, $priority = 0, $callback = null) {
 		$controllerCache = self::getControllerCache ( $isRest );
 		Router::addRouteToRoutes ( $controllerCache, $path, $controller, $action, $methods, $name, false, null, [ ], $priority, $callback );
-		self::$cache->store ( 'controllers/routes.' . ($isRest ? 'rest' : 'default'), "return " . UArray::asPhpArray ( $controllerCache, 'array' ) . ';', 'controllers' );
+		self::$cache->store ( 'controllers/routes.' . ($isRest ? 'rest' : 'default'), $controllerCache, 'controllers' );
 	}
 
 	public static function addRoutes($pathArray, $controller, $action = 'index', $methods = null, $name = '') {
@@ -204,7 +209,7 @@ trait RouterCacheTrait {
 			$postfix = 'rest';
 		}
 		Router::addRoutesToRoutes ( $controllerCache, $pathArray, $controller, $action, $methods, $name );
-		self::$cache->store ( 'controllers/routes.' . $postfix, 'return ' . UArray::asPhpArray ( $controllerCache, 'array' ) . ';', 'controllers' );
+		self::$cache->store ( 'controllers/routes.' . $postfix, $controllerCache, 'controllers' );
 	}
 
 	public static function getControllersFiles(&$config, $silent = false) {
@@ -224,9 +229,9 @@ trait RouterCacheTrait {
 			$restCtrls = [ ];
 		}
 		foreach ( $files as $file ) {
-			if (is_file ( $file )) {
+			if (\is_file ( $file )) {
 				$controllerClass = ClassUtils::getClassFullNameFromFile ( $file, $backslash );
-				if (isset ( $restCtrls [$controllerClass] ) === false) {
+				if (\class_exists ( $controllerClass ) && isset ( $restCtrls [$controllerClass] ) === false) {
 					$r = new \ReflectionClass ( $controllerClass );
 					if ($r->isSubclassOf ( $subClass ) && ($includeAbstract || ! $r->isAbstract ())) {
 						$result [] = $controllerClass;

@@ -7,7 +7,7 @@ namespace Ubiquity\db\providers;
  * This class is part of Ubiquity
  *
  * @author jcheron <myaddressmail@gmail.com>
- * @version 1.0.0
+ * @version 1.0.4
  *
  */
 abstract class AbstractDbWrapper {
@@ -24,11 +24,15 @@ abstract class AbstractDbWrapper {
 	abstract public static function getAvailableDrivers();
 
 	public function _getStatement(string $sql) {
-		$key = \md5 ( $sql );
-		if (! isset ( $this->statements [$key] )) {
-			$this->statements [$key] = $this->getStatement ( $sql );
-		}
-		return $this->statements [$key];
+		return $this->statements [\md5 ( $sql )] ??= $this->getStatement ( $sql );
+	}
+
+	public function prepareNamedStatement(string $name, string $sql) {
+		return $this->statements [$name] = $this->getStatement ( $sql );
+	}
+
+	public function getNamedStatement(string $name, ?string $sql = null) {
+		return $this->statements [$name] ??= $this->getStatement ( $sql );
 	}
 
 	abstract public function getStatement(string $sql);
@@ -45,7 +49,7 @@ abstract class AbstractDbWrapper {
 
 	abstract public function statementRowCount($statement);
 
-	abstract public function lastInsertId();
+	abstract public function lastInsertId($name = null);
 
 	/**
 	 * Used by DAO
@@ -92,7 +96,16 @@ abstract class AbstractDbWrapper {
 
 	abstract public function _optPrepareAndExecute($sql, array $values = null);
 
+	abstract public function getRowNum(string $tableName, string $pkName, string $condition): int;
+
+	abstract public function groupConcat(string $fields, string $separator): string;
+
+	public function toStringOperator() {
+		return '';
+	}
+
 	public function close() {
+		$this->statements = [ ];
 		$this->dbInstance = null;
 	}
 
